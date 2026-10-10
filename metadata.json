@@ -1,0 +1,6 @@
+{
+  "name": "Mu Online Season 6 - Web Portal & Engine",
+  "description": "Portal completo para servidor de Mu Online Season 6 com rankings em tempo real, downloads, painel do jogador e checkout Pix automático via Mercado Pago.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
