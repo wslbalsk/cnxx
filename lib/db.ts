@@ -1,4 +1,4 @@
-import sql from 'mssql';
+import * as sql from 'mssql';
 
 // Configuration from environment variables
 const dbConfig: sql.config = {
@@ -405,7 +405,7 @@ export const MuDatabase = {
     if (pool) {
       try {
         const req = pool.request();
-        req.input('memb___id', sql.VarChar(10), username);
+        req.input('memb___id', username);
         const result = await req.query<MembInfoRow>(`
           SELECT memb___id, memb__pwd AS memb__passwd, mail_addr, bloc_code, appl_days
           FROM MEMB_INFO
@@ -415,7 +415,7 @@ export const MuDatabase = {
       } catch {
         // Retry with memb__passwd column variant if server uses that naming
         const req2 = pool.request();
-        req2.input('memb___id', sql.VarChar(10), username);
+        req2.input('memb___id', username);
         const result = await req2.query<MembInfoRow>(`
           SELECT memb___id, memb__passwd, mail_addr, bloc_code, appl_days
           FROM MEMB_INFO
@@ -441,9 +441,9 @@ export const MuDatabase = {
       await transaction.begin();
       try {
         const req1 = new sql.Request(transaction);
-        req1.input('memb___id', sql.VarChar(10), username);
-        req1.input('memb__pwd', sql.VarChar(50), passwordHashOrPlain);
-        req1.input('mail_addr', sql.VarChar(50), email);
+        req1.input('memb___id', username);
+        req1.input('memb__pwd', passwordHashOrPlain);
+        req1.input('mail_addr', email);
 
         await req1.query(`
           INSERT INTO MEMB_INFO (memb___id, memb__pwd, mail_addr, bloc_code, ctl1_code)
@@ -452,7 +452,7 @@ export const MuDatabase = {
 
         // Check if T_InGameShop_Point exists and insert default 0 points
         const req2 = new sql.Request(transaction);
-        req2.input('memb___id', sql.VarChar(10), username);
+        req2.input('memb___id', username);
         await req2.query(`
           IF NOT EXISTS (SELECT 1 FROM T_InGameShop_Point WHERE memb___id = @memb___id)
           BEGIN
@@ -519,8 +519,8 @@ export const MuDatabase = {
     const pool = await getDbPool();
     if (pool) {
       const req = pool.request();
-      req.input('memb___id', sql.VarChar(10), username);
-      req.input('new_pwd', sql.VarChar(50), newPassword);
+      req.input('memb___id', username);
+      req.input('new_pwd', newPassword);
       try {
         await req.query(`
           UPDATE MEMB_INFO
@@ -530,8 +530,8 @@ export const MuDatabase = {
         return true;
       } catch {
         const req2 = pool.request();
-        req2.input('memb___id', sql.VarChar(10), username);
-        req2.input('new_pwd', sql.VarChar(50), newPassword);
+        req2.input('memb___id', username);
+        req2.input('new_pwd', newPassword);
         await req2.query(`
           UPDATE MEMB_INFO
           SET memb__passwd = @new_pwd
@@ -558,7 +558,7 @@ export const MuDatabase = {
     if (pool) {
       try {
         const req = pool.request();
-        req.input('memb___id', sql.VarChar(10), username);
+        req.input('memb___id', username);
         const result = await req.query<InGameShopRow>(`
           SELECT memb___id, ISNULL(WCoinC, 0) AS WCoinC, ISNULL(WCoinP, 0) AS WCoinP, ISNULL(GoblinPoint, 0) AS GoblinPoint
           FROM T_InGameShop_Point
@@ -569,7 +569,14 @@ export const MuDatabase = {
         }
       } catch (err) {
         console.warn('[MSSQL getShopPoints error]:', err);
+        if (!mockDbEnabled) {
+          return { memb___id: username, WCoinC: 0, WCoinP: 0, GoblinPoint: 0 };
+        }
       }
+    }
+
+    if (!mockDbEnabled) {
+      return { memb___id: username, WCoinC: 0, WCoinP: 0, GoblinPoint: 0 };
     }
 
     const store = getMockStore();
@@ -596,7 +603,7 @@ export const MuDatabase = {
       try {
         // Update or insert T_InGameShop_Point
         const req1 = new sql.Request(transaction);
-        req1.input('memb___id', sql.VarChar(10), username);
+        req1.input('memb___id', username);
         req1.input('wcoin', sql.Int, wcoinAmount);
         await req1.query(`
           IF EXISTS (SELECT 1 FROM T_InGameShop_Point WHERE memb___id = @memb___id)
@@ -622,11 +629,11 @@ export const MuDatabase = {
 
         // Insert or update transaction log
         const req2 = new sql.Request(transaction);
-        req2.input('memb___id', sql.VarChar(10), username);
-        req2.input('payment_id', sql.VarChar(100), paymentId);
+        req2.input('memb___id', username);
+        req2.input('payment_id', paymentId);
         req2.input('amount_brl', sql.Decimal(10, 2), amountBRL);
         req2.input('wcoin_added', sql.Int, wcoinAmount);
-        req2.input('status', sql.VarChar(20), 'approved');
+        req2.input('status', 'approved');
 
         await req2.query(`
           IF EXISTS (SELECT 1 FROM RMT_Transactions WHERE payment_id = @payment_id)
@@ -697,11 +704,11 @@ export const MuDatabase = {
         `);
 
         const req = pool.request();
-        req.input('memb___id', sql.VarChar(10), username);
-        req.input('payment_id', sql.VarChar(100), paymentId);
+        req.input('memb___id', username);
+        req.input('payment_id', paymentId);
         req.input('amount_brl', sql.Decimal(10, 2), amountBRL);
         req.input('wcoin_added', sql.Int, wcoinAmount);
-        req.input('status', sql.VarChar(20), 'pending');
+        req.input('status', 'pending');
 
         await req.query(`
           INSERT INTO RMT_Transactions (memb___id, payment_id, amount_brl, wcoin_added, status, created_at)
@@ -733,7 +740,7 @@ export const MuDatabase = {
     if (pool) {
       try {
         const req = pool.request();
-        req.input('payment_id', sql.VarChar(100), paymentId);
+        req.input('payment_id', paymentId);
         const result = await req.query<RmtTransactionRow>(`
           SELECT id, memb___id, payment_id, amount_brl, wcoin_added, status, created_at
           FROM RMT_Transactions
@@ -759,7 +766,7 @@ export const MuDatabase = {
       try {
         const req = pool.request();
         const grandResetColumn = quoteIdentifierPath(dbSchema.grandResetColumn);
-        req.input('AccountID', sql.VarChar(10), username);
+        req.input('AccountID', username);
         const result = await req.query<CharacterRow>(`
           SELECT 
             c.AccountID, c.Name, c.cLevel, 
@@ -772,7 +779,7 @@ export const MuDatabase = {
             c.MapNumber, c.MapPosX, c.MapPosY,
             ISNULL(g.G_Name, '') AS GuildName
           FROM Character c
-          LEFT JOIN GuildMember g ON c.Name = g.G_Name
+          LEFT JOIN GuildMember g ON c.Name = g.Name
           WHERE c.AccountID = @AccountID
           ORDER BY c.ResetCount DESC, c.cLevel DESC
         `);
@@ -798,8 +805,8 @@ export const MuDatabase = {
     if (pool) {
       try {
         const req = pool.request();
-        req.input('AccountID', sql.VarChar(10), username);
-        req.input('Name', sql.VarChar(10), characterName);
+        req.input('AccountID', username);
+        req.input('Name', characterName);
 
         if (action === 'clear_pk') {
           await req.query(`
@@ -1030,7 +1037,7 @@ export const MuDatabase = {
       const request = pool.request();
 
       if (statusPredicate.includes('@onlineStatusValue')) {
-        request.input('onlineStatusValue', sql.VarChar(16), statusValue);
+        request.input('onlineStatusValue', statusValue);
       }
 
       try {
