@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect, useCallback, Suspense } from 'react';
+import React, { useState, useEffect, Suspense } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { Trophy, Search, Shield, Crown, Swords, Users, Sparkles, RefreshCw } from 'lucide-react';
 import { MU_CLASSES, getClassName } from '@/lib/mu-constants';
@@ -15,16 +15,27 @@ function RankingsContent() {
   const [data, setData] = useState<any[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
   const [searchQuery, setSearchQuery] = useState<string>('');
+  const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
 
   useEffect(() => {
     let active = true;
-    const load = async () => {
+    let controller: AbortController | null = null;
+
+    const load = async (showLoading: boolean) => {
+      controller?.abort();
+      controller = new AbortController();
+      if (showLoading) setLoading(true);
+
       try {
-        const res = await fetch(`/api/rankings?type=${activeTab}`);
+        const res = await fetch(`/api/rankings?type=${activeTab}`, {
+          cache: 'no-store',
+          signal: controller.signal,
+        });
         const json = await res.json();
         if (active) {
           if (json.success && json.data) {
             setData(json.data);
+            setLastUpdated(new Date());
           } else {
             setData([]);
           }
@@ -32,13 +43,17 @@ function RankingsContent() {
       } catch {
         if (active) setData([]);
       } finally {
-        if (active) setLoading(false);
+        if (active && showLoading) setLoading(false);
       }
     };
 
-    load();
+    load(true);
+    const interval = window.setInterval(() => load(false), 15000);
+
     return () => {
       active = false;
+      controller?.abort();
+      window.clearInterval(interval);
     };
   }, [activeTab]);
 
@@ -58,6 +73,7 @@ function RankingsContent() {
     }
     return (item.Name || '').toLowerCase().includes(q) || (item.GuildName || '').toLowerCase().includes(q);
   });
+  const siegeData = data[0];
 
   return (
     <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-10 space-y-8">
@@ -74,6 +90,9 @@ function RankingsContent() {
           </h1>
           <p className="text-sm text-slate-300 mt-1 max-w-xl">
             Acompanhe a disputa pelas primeiras posições do servidor. Os rankings são sincronizados diretamente com o banco de dados.
+          </p>
+          <p className="text-[11px] text-slate-500 mt-2">
+            {lastUpdated ? `Última atualização: ${lastUpdated.toLocaleTimeString('pt-BR')}` : 'Consultando dados atuais...'}
           </p>
         </div>
 
@@ -126,21 +145,21 @@ function RankingsContent() {
           <div className="bg-[#12151c] border border-amber-500/30 rounded-xl p-6 lg:p-8 relative overflow-hidden">
             <div className="max-w-2xl space-y-4">
               <div className="flex items-center gap-2 text-xs font-bold text-amber-400 uppercase tracking-wider">
-                <Crown className="w-4 h-4" /> Detentores da Coroa do Castelo (Soberanos Atuais)
+                <Crown className="w-4 h-4" /> Detentor atual do Castle Siege
               </div>
-              <h2 className="text-3xl font-extrabold text-white">Guild Valhalla</h2>
+              <h2 className="text-3xl font-extrabold text-white">{siegeData?.CastleOwner || 'Sem dados'}</h2>
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 pt-2 text-xs">
                 <div className="bg-[#0b0d11] p-3 rounded border border-[#1a1f29]">
                   <span className="text-slate-400 block text-[10px]">Guild Master:</span>
-                  <strong className="text-white text-sm">LordKael</strong>
+                  <strong className="text-white text-sm">{siegeData?.GuildMaster || '-'}</strong>
                 </div>
                 <div className="bg-[#0b0d11] p-3 rounded border border-[#1a1f29]">
-                  <span className="text-slate-400 block text-[10px]">Aliança Registrada:</span>
-                  <strong className="text-amber-400 text-sm">Nordic Alliance</strong>
+                  <span className="text-slate-400 block text-[10px]">Aliança:</span>
+                  <strong className="text-amber-400 text-sm">{siegeData?.Alliance || '-'}</strong>
                 </div>
                 <div className="bg-[#0b0d11] p-3 rounded border border-[#1a1f29]">
-                  <span className="text-slate-400 block text-[10px]">Defesas Consecutivas:</span>
-                  <strong className="text-emerald-400 text-sm">5 Semanas</strong>
+                  <span className="text-slate-400 block text-[10px]">Próxima batalha:</span>
+                  <strong className="text-emerald-400 text-sm">{siegeData?.NextBattleDate || '-'}</strong>
                 </div>
               </div>
             </div>
@@ -163,20 +182,21 @@ function RankingsContent() {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-[#181d26] text-slate-300">
-                  <tr>
-                    <td className="py-3 px-4 font-bold text-amber-400">#1 Atacante</td>
-                    <td className="py-3 px-4 font-semibold text-white">Imperium</td>
-                    <td className="py-3 px-4 text-slate-300">HighQueenSylv</td>
-                    <td className="py-3 px-4 text-emerald-400 font-medium">Inscrição Aprovada</td>
-                    <td className="py-3 px-4 text-right tabular-nums font-mono text-amber-300">1.250 Signs</td>
-                  </tr>
-                  <tr>
-                    <td className="py-3 px-4 font-bold text-slate-300">#2 Atacante</td>
-                    <td className="py-3 px-4 font-semibold text-white">DragonLords</td>
-                    <td className="py-3 px-4 text-slate-300">DimensionWitch</td>
-                    <td className="py-3 px-4 text-emerald-400 font-medium">Inscrição Aprovada</td>
-                    <td className="py-3 px-4 text-right tabular-nums font-mono text-amber-300">890 Signs</td>
-                  </tr>
+                  {(siegeData?.RegisteredGuilds || []).length === 0 ? (
+                    <tr>
+                      <td colSpan={5} className="py-6 px-4 text-center text-slate-400">
+                        Nenhuma guild desafiante disponível no banco de dados.
+                      </td>
+                    </tr>
+                  ) : (siegeData.RegisteredGuilds || []).map((guild: any, idx: number) => (
+                    <tr key={guild.Guild || idx}>
+                      <td className="py-3 px-4 font-bold text-amber-400">#{idx + 1} Atacante</td>
+                      <td className="py-3 px-4 font-semibold text-white">{guild.Guild || '-'}</td>
+                      <td className="py-3 px-4 text-slate-300">{guild.Master || '-'}</td>
+                      <td className="py-3 px-4 text-emerald-400 font-medium">{guild.AttackStatus || '-'}</td>
+                      <td className="py-3 px-4 text-right tabular-nums font-mono text-amber-300">{guild.Signs || '-'}</td>
+                    </tr>
+                  ))}
                 </tbody>
               </table>
             </div>
@@ -329,3 +349,4 @@ export default function RankingsPage() {
     </Suspense>
   );
 }
+
