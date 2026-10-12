@@ -52,6 +52,7 @@ export default function Navbar() {
 
   const navLinks = [
     { label: 'Início', href: '/' },
+    { label: 'Servidor', href: '/about' },
     { label: 'Downloads', href: '/downloads' },
     { label: 'Rankings', href: '/rankings' },
     { label: 'WebShop / Doar', href: '/donate' },
