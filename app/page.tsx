@@ -4,7 +4,7 @@ import React, { useState, useEffect } from 'react';
 import Image from 'next/image';
 import Link from 'next/link';
 import { calculateEventTimers, EventTimer } from '@/lib/events';
-import ServerWidget from '@/components/layout/ServerWidget';
+import ServerWidget, { type ServerStatsSnapshot } from '@/components/layout/ServerWidget';
 import { 
   Download, 
   UserPlus, 
@@ -24,24 +24,63 @@ import { MU_CLASSES } from '@/lib/mu-constants';
 export default function HomePage() {
   const [events, setEvents] = useState<EventTimer[]>(() => calculateEventTimers());
   const [quickRankings, setQuickRankings] = useState<any[]>([]);
+  const [serverStats, setServerStats] = useState<ServerStatsSnapshot & {
+    onlinePlayers?: number;
+    maxOnline?: number;
+  } | null>(null);
 
   useEffect(() => {
+    let active = true;
+    let statusController: AbortController | null = null;
+
     // Update countdown every second
     const timerInterval = setInterval(() => {
       setEvents(calculateEventTimers());
     }, 1000);
 
-    // Fetch quick rankings
-    fetch('/api/rankings?type=resets')
-      .then((res) => res.json())
-      .then((data) => {
-        if (data.success && data.data) {
+    const loadStatus = async () => {
+      statusController?.abort();
+      statusController = new AbortController();
+
+      try {
+        const res = await fetch('/api/status', {
+          cache: 'no-store',
+          signal: statusController.signal,
+        });
+        const data = await res.json();
+        if (active && data.success && data.stats) {
+          setServerStats(data.stats);
+        }
+      } catch {
+        // The next interval retries without interrupting the page.
+      }
+    };
+
+    loadStatus();
+    const statusInterval = setInterval(loadStatus, 15000);
+
+    const loadQuickRankings = async () => {
+      try {
+        const res = await fetch('/api/rankings?type=resets', { cache: 'no-store' });
+        const data = await res.json();
+        if (active && data.success && data.data) {
           setQuickRankings(data.data.slice(0, 5));
         }
-      })
-      .catch(() => {});
+      } catch {
+        // The next interval retries without interrupting the page.
+      }
+    };
 
-    return () => clearInterval(timerInterval);
+    loadQuickRankings();
+    const rankingsInterval = setInterval(loadQuickRankings, 15000);
+
+    return () => {
+      active = false;
+      statusController?.abort();
+      clearInterval(timerInterval);
+      clearInterval(statusInterval);
+      clearInterval(rankingsInterval);
+    };
   }, []);
 
   const newsItems = [
@@ -158,7 +197,9 @@ export default function HomePage() {
           <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-center">
             <div className="p-2 border-r border-[#1a1f2a] last:border-r-0">
               <span className="text-[11px] text-slate-400 uppercase tracking-wider block">Jogadores Ativos</span>
-              <strong className="text-xl sm:text-2xl font-extrabold text-amber-400 tabular-nums">487 Online</strong>
+              <strong className="text-xl sm:text-2xl font-extrabold text-amber-400 tabular-nums">
+                {serverStats?.onlinePlayers ?? '—'} Online
+              </strong>
             </div>
             <div className="p-2 border-r border-[#1a1f2a] last:border-r-0">
               <span className="text-[11px] text-slate-400 uppercase tracking-wider block">Taxa de Experiência</span>
@@ -170,7 +211,9 @@ export default function HomePage() {
             </div>
             <div className="p-2">
               <span className="text-[11px] text-slate-400 uppercase tracking-wider block">Dono do Castelo</span>
-              <strong className="text-xl sm:text-2xl font-extrabold text-amber-300">Valhalla</strong>
+              <strong className="text-xl sm:text-2xl font-extrabold text-amber-300">
+                {serverStats?.castleSiegeOwner || '—'}
+              </strong>
             </div>
           </div>
         </div>
@@ -340,7 +383,7 @@ export default function HomePage() {
           {/* Sidebar Column */}
           <div className="space-y-6">
             {/* Server Rates & Castle Siege Widget */}
-            <ServerWidget />
+            <ServerWidget serverStats={serverStats} />
 
             {/* Top 5 Resets Quick Ranking */}
             <div className="bg-[#12151c] border border-[#222733] rounded-xl overflow-hidden shadow-xl">
@@ -416,3 +459,4 @@ export default function HomePage() {
     </div>
   );
 }
+
