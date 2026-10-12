@@ -6,9 +6,18 @@ import { Crown, Sparkles, Swords, Zap, CheckCircle2, ShieldAlert } from 'lucide-
 
 interface ServerWidgetProps {
   compact?: boolean;
+  serverStats?: ServerStatsSnapshot | null;
 }
 
-export default function ServerWidget({ compact = false }: ServerWidgetProps) {
+export interface ServerStatsSnapshot {
+  castleSiegeOwner?: string;
+  castleSiegeMaster?: string;
+  databaseConnected?: boolean;
+}
+
+export default function ServerWidget({ compact = false, serverStats }: ServerWidgetProps) {
+  const castleOwner = serverStats?.castleSiegeOwner || '-';
+  const castleMaster = serverStats?.castleSiegeMaster || '-';
   const rates = [
     { label: 'Versão', value: 'Season 6 Ep. 3' },
     { label: 'Experiência Geral', value: '20x Dinâmica' },
@@ -98,8 +107,8 @@ export default function ServerWidget({ compact = false }: ServerWidgetProps) {
             </div>
             <div>
               <span className="text-[10px] text-slate-400 uppercase tracking-wider block">Guild Detentora</span>
-              <h4 className="text-base font-extrabold text-white">Valhalla</h4>
-              <p className="text-xs text-amber-400/90 font-medium">GM: LordKael</p>
+              <h4 className="text-base font-extrabold text-white">{castleOwner}</h4>
+              <p className="text-xs text-amber-400/90 font-medium">GM: {castleMaster}</p>
             </div>
           </div>
 
@@ -140,3 +149,4 @@ export default function ServerWidget({ compact = false }: ServerWidgetProps) {
     </aside>
   );
 }
+
