@@ -35,7 +35,8 @@ const dbSchema = {
   characterGuildColumn: process.env.DB_CHARACTER_GUILD_COLUMN || 'Guild',
   guildMemberCharacterColumn: process.env.DB_GUILD_MEMBER_CHARACTER_COLUMN || 'Name',
   guildMemberGuildColumn: process.env.DB_GUILD_MEMBER_GUILD_COLUMN || 'G_Name',
-  masterLevelColumn: process.env.DB_MASTER_LEVEL_COLUMN || 'MasterLevel',
+  masterLevelColumn: process.env.DB_MASTER_LEVEL_COLUMN || 'MasterResetCount',
+  grandResetColumn: process.env.DB_GRAND_RESET_COLUMN || 'MasterResetCount',
   siegeTable: process.env.DB_SIEGE_TABLE || 'MuCastle_DATA',
   siegeOwnerColumn: process.env.DB_SIEGE_OWNER_COLUMN || 'OWNER_GUILD',
 };
@@ -310,7 +311,7 @@ export async function getDbPool(): Promise<sql.ConnectionPool | null> {
     global.__mssqlPool = connectedPool;
     global.__mssqlAvailable = true;
     global.__mssqlRetryAt = undefined;
-    console.log('[MSSQL] Conectado com sucesso ao Microsoft SQL Server (MuOnline)');
+    console.log(`[MSSQL] Conectado com sucesso ao Microsoft SQL Server (${dbConfig.database})`);
     return connectedPool;
   } catch (err) {
     global.__mssqlRetryAt = Date.now() + retryDelayMs;
@@ -757,12 +758,13 @@ export const MuDatabase = {
     if (pool) {
       try {
         const req = pool.request();
+        const grandResetColumn = quoteIdentifierPath(dbSchema.grandResetColumn);
         req.input('AccountID', sql.VarChar(10), username);
         const result = await req.query<CharacterRow>(`
           SELECT 
             c.AccountID, c.Name, c.cLevel, 
             ISNULL(c.ResetCount, 0) AS ResetCount, 
-            ISNULL(c.m_GrandReset, 0) AS m_GrandReset,
+            ISNULL(c.${grandResetColumn}, 0) AS m_GrandReset,
             c.Class, c.Money, c.Strength, c.Dexterity, c.Vitality, c.Energy, 
             ISNULL(c.Leadership, 0) AS Leadership,
             ISNULL(c.PkCount, 0) AS PkCount,
@@ -869,18 +871,19 @@ export const MuDatabase = {
         const guildMemberCharacterColumn = quoteIdentifierPath(dbSchema.guildMemberCharacterColumn);
         const guildMemberGuildColumn = quoteIdentifierPath(dbSchema.guildMemberGuildColumn);
         const masterLevelColumn = quoteIdentifierPath(dbSchema.masterLevelColumn);
+        const grandResetColumn = quoteIdentifierPath(dbSchema.grandResetColumn);
 
         if (category === 'resets') {
           const result = await req.query(`
             SELECT TOP 50 
               c.Name, c.cLevel, 
               ISNULL(c.ResetCount, 0) AS ResetCount, 
-              ISNULL(c.m_GrandReset, 0) AS m_GrandReset, 
+              ISNULL(c.${grandResetColumn}, 0) AS m_GrandReset, 
               c.Class, 
               ISNULL(gm.${guildMemberGuildColumn}, '-') AS GuildName
             FROM ${characterTable} c
             LEFT JOIN ${guildMemberTable} gm ON c.Name = gm.${guildMemberCharacterColumn}
-            ORDER BY c.m_GrandReset DESC, c.ResetCount DESC, c.cLevel DESC
+            ORDER BY c.${grandResetColumn} DESC, c.ResetCount DESC, c.cLevel DESC
           `);
           return result.recordset;
         } else if (category === 'level') {
@@ -901,7 +904,7 @@ export const MuDatabase = {
               c.Name, c.cLevel,
               ISNULL(c.${masterLevelColumn}, 0) AS MasterLevel,
               ISNULL(c.ResetCount, 0) AS ResetCount,
-              ISNULL(c.m_GrandReset, 0) AS m_GrandReset,
+              ISNULL(c.${grandResetColumn}, 0) AS m_GrandReset,
               c.Class,
               ISNULL(gm.${guildMemberGuildColumn}, '-') AS GuildName
             FROM ${characterTable} c
