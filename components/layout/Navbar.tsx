@@ -10,20 +10,44 @@ export default function Navbar() {
   const pathname = usePathname();
   const { user, logout } = useAuth();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
-  const [onlineCount, setOnlineCount] = useState(487);
-  const [serverOnline, setServerOnline] = useState(true);
+  const [onlineCount, setOnlineCount] = useState<number | null>(null);
+  const [maxOnline, setMaxOnline] = useState(1500);
+  const [serverOnline, setServerOnline] = useState(false);
 
   useEffect(() => {
-    // Fetch live status
-    fetch('/api/status')
-      .then((res) => res.json())
-      .then((data) => {
-        if (data.success && data.stats) {
-          setOnlineCount(data.stats.onlinePlayers || 487);
-          setServerOnline(data.stats.connectServerStatus === 'Online');
+    let active = true;
+    let controller: AbortController | null = null;
+
+    const loadStatus = async () => {
+      controller?.abort();
+      controller = new AbortController();
+
+      try {
+        const res = await fetch('/api/status', {
+          cache: 'no-store',
+          signal: controller.signal,
+        });
+        const data = await res.json();
+        if (active && data.success && data.stats) {
+          setOnlineCount(Number(data.stats.onlinePlayers ?? 0));
+          setMaxOnline(Number(data.stats.maxOnline ?? 1500));
+          setServerOnline(Boolean(data.stats.databaseConnected));
         }
-      })
-      .catch(() => {});
+      } catch {
+        if (active) {
+          setServerOnline(false);
+        }
+      }
+    };
+
+    loadStatus();
+    const interval = window.setInterval(loadStatus, 15000);
+
+    return () => {
+      active = false;
+      controller?.abort();
+      window.clearInterval(interval);
+    };
   }, []);
 
   const navLinks = [
@@ -51,7 +75,7 @@ export default function Navbar() {
           </div>
           <div className="flex items-center gap-3 tabular-nums">
             <span className="text-slate-400">
-              Jogadores Online: <strong className="text-amber-400 font-semibold">{onlineCount}</strong> / 1500
+              Jogadores Online: <strong className="text-amber-400 font-semibold">{onlineCount ?? '—'}</strong> / {maxOnline}
             </span>
             <span className="text-slate-600">·</span>
             <span className="text-slate-400 hidden sm:inline">Versão: <strong className="text-slate-200">S6 Ep. 3</strong></span>
@@ -213,3 +237,4 @@ export default function Navbar() {
     </header>
   );
 }
+
