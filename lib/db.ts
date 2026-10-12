@@ -20,10 +20,50 @@ const dbConfig: sql.config = {
   },
 };
 
+// Mock data must be explicitly enabled for local development; never enable it by default online.
+const mockDbEnabled = process.env.NODE_ENV !== 'production' && process.env.DB_ALLOW_MOCK === 'true';
+const retryDelayMs = 15000;
+
+const dbSchema = {
+  accountTable: process.env.DB_ACCOUNT_TABLE || 'MEMB_INFO',
+  characterTable: process.env.DB_CHARACTER_TABLE || 'Character',
+  guildTable: process.env.DB_GUILD_TABLE || 'Guild',
+  guildMemberTable: process.env.DB_GUILD_MEMBER_TABLE || 'GuildMember',
+  onlineTable: process.env.DB_ONLINE_TABLE || 'MEMB_STAT',
+  onlineStatusColumn: process.env.DB_ONLINE_STATUS_COLUMN || 'ConnectStat',
+  onlineStatusValue: process.env.DB_ONLINE_STATUS_VALUE || '1',
+  characterGuildColumn: process.env.DB_CHARACTER_GUILD_COLUMN || 'Guild',
+  guildMemberCharacterColumn: process.env.DB_GUILD_MEMBER_CHARACTER_COLUMN || 'Name',
+  guildMemberGuildColumn: process.env.DB_GUILD_MEMBER_GUILD_COLUMN || 'G_Name',
+  masterLevelColumn: process.env.DB_MASTER_LEVEL_COLUMN || 'MasterLevel',
+  siegeTable: process.env.DB_SIEGE_TABLE || 'MuCastle_DATA',
+  siegeOwnerColumn: process.env.DB_SIEGE_OWNER_COLUMN || 'OWNER_GUILD',
+};
+
+function quoteIdentifierPath(identifier: string): string {
+  if (!/^[A-Za-z_][A-Za-z0-9_.]*$/.test(identifier)) {
+    throw new Error(`Identificador SQL inválido: ${identifier}`);
+  }
+
+  return identifier
+    .split('.')
+    .map((part) => `[${part}]`)
+    .join('.');
+}
+
+function getMockStore(): MockStore {
+  if (!mockDbEnabled) {
+    throw new Error('SQL Server indisponível e fallback mock desativado. Configure as variáveis DB_* no ambiente.');
+  }
+
+  return global.__mockDbStore!;
+}
+
 // Global pool cache across hot reloads in Next.js development
 declare global {
   var __mssqlPool: sql.ConnectionPool | undefined;
   var __mssqlAvailable: boolean | undefined;
+  var __mssqlRetryAt: number | undefined;
   var __mockDbStore: MockStore | undefined;
 }
 
@@ -249,8 +289,8 @@ if (!global.__mockDbStore) {
  * Gracefully handles connection failures and returns null if MSSQL is unreachable.
  */
 export async function getDbPool(): Promise<sql.ConnectionPool | null> {
-  // If we already verified MSSQL is not configured or offline, skip slow reconnect timeouts
-  if (global.__mssqlAvailable === false) {
+  // Avoid hammering SQL Server while still retrying if it comes back online.
+  if (global.__mssqlAvailable === false && (global.__mssqlRetryAt || 0) > Date.now()) {
     return null;
   }
 
@@ -260,6 +300,7 @@ export async function getDbPool(): Promise<sql.ConnectionPool | null> {
 
   if (!process.env.DB_PASS && !process.env.DB_HOST) {
     global.__mssqlAvailable = false;
+    global.__mssqlRetryAt = Date.now() + retryDelayMs;
     return null;
   }
 
@@ -268,10 +309,12 @@ export async function getDbPool(): Promise<sql.ConnectionPool | null> {
     const connectedPool = await pool.connect();
     global.__mssqlPool = connectedPool;
     global.__mssqlAvailable = true;
+    global.__mssqlRetryAt = undefined;
     console.log('[MSSQL] Conectado com sucesso ao Microsoft SQL Server (MuOnline)');
     return connectedPool;
   } catch (err) {
-    console.warn('[MSSQL] Conexão com SQL Server falhou ou não configurada localmente. Utilizando Engine Season 6 Integrada:', (err as Error).message);
+    global.__mssqlRetryAt = Date.now() + retryDelayMs;
+    console.warn('[MSSQL] Conexão com SQL Server indisponível:', (err as Error).message);
     global.__mssqlAvailable = false;
     return null;
   }
@@ -382,7 +425,7 @@ export const MuDatabase = {
     }
 
     // Fallback Engine
-    const store = global.__mockDbStore!;
+    const store = getMockStore();
     const acc = store.accounts.find((a) => a.memb___id.toLowerCase() === username.toLowerCase());
     return acc ? { ...acc } : null;
   },
@@ -426,7 +469,7 @@ export const MuDatabase = {
     }
 
     // Fallback Engine
-    const store = global.__mockDbStore!;
+    const store = getMockStore();
     if (store.accounts.some((a) => a.memb___id.toLowerCase() === username.toLowerCase())) {
       throw new Error('Nome de usuário já existe no servidor.');
     }
@@ -497,7 +540,7 @@ export const MuDatabase = {
       }
     }
 
-    const store = global.__mockDbStore!;
+    const store = getMockStore();
     const acc = store.accounts.find((a) => a.memb___id.toLowerCase() === username.toLowerCase());
     if (acc) {
       acc.memb__passwd = newPassword;
@@ -528,7 +571,7 @@ export const MuDatabase = {
       }
     }
 
-    const store = global.__mockDbStore!;
+    const store = getMockStore();
     const points = store.shopPoints.get(username) || { WCoinC: 0, WCoinP: 0, GoblinPoint: 0 };
     return {
       memb___id: username,
@@ -601,7 +644,7 @@ export const MuDatabase = {
     }
 
     // Fallback store
-    const store = global.__mockDbStore!;
+    const store = getMockStore();
     const current = store.shopPoints.get(username) || { WCoinC: 0, WCoinP: 0, GoblinPoint: 0 };
     store.shopPoints.set(username, {
       ...current,
@@ -669,7 +712,7 @@ export const MuDatabase = {
       }
     }
 
-    const store = global.__mockDbStore!;
+    const store = getMockStore();
     store.transactions.unshift({
       id: store.transactions.length + 1,
       memb___id: username,
@@ -701,7 +744,7 @@ export const MuDatabase = {
       }
     }
 
-    const store = global.__mockDbStore!;
+    const store = getMockStore();
     const tx = store.transactions.find((t) => t.payment_id === paymentId);
     return tx || null;
   },
@@ -737,7 +780,7 @@ export const MuDatabase = {
       }
     }
 
-    const store = global.__mockDbStore!;
+    const store = getMockStore();
     return store.characters.filter((c) => c.AccountID.toLowerCase() === username.toLowerCase());
   },
 
@@ -783,7 +826,7 @@ export const MuDatabase = {
       }
     }
 
-    const store = global.__mockDbStore!;
+    const store = getMockStore();
     const char = store.characters.find(
       (c) => c.AccountID.toLowerCase() === username.toLowerCase() && c.Name.toLowerCase() === characterName.toLowerCase()
     );
@@ -820,6 +863,13 @@ export const MuDatabase = {
     if (pool) {
       try {
         const req = pool.request();
+        const characterTable = quoteIdentifierPath(dbSchema.characterTable);
+        const guildTable = quoteIdentifierPath(dbSchema.guildTable);
+        const guildMemberTable = quoteIdentifierPath(dbSchema.guildMemberTable);
+        const guildMemberCharacterColumn = quoteIdentifierPath(dbSchema.guildMemberCharacterColumn);
+        const guildMemberGuildColumn = quoteIdentifierPath(dbSchema.guildMemberGuildColumn);
+        const masterLevelColumn = quoteIdentifierPath(dbSchema.masterLevelColumn);
+
         if (category === 'resets') {
           const result = await req.query(`
             SELECT TOP 50 
@@ -827,9 +877,9 @@ export const MuDatabase = {
               ISNULL(c.ResetCount, 0) AS ResetCount, 
               ISNULL(c.m_GrandReset, 0) AS m_GrandReset, 
               c.Class, 
-              ISNULL(g.G_Name, '-') AS GuildName
-            FROM Character c
-            LEFT JOIN GuildMember g ON c.Name = g.G_Name
+              ISNULL(gm.${guildMemberGuildColumn}, '-') AS GuildName
+            FROM ${characterTable} c
+            LEFT JOIN ${guildMemberTable} gm ON c.Name = gm.${guildMemberCharacterColumn}
             ORDER BY c.m_GrandReset DESC, c.ResetCount DESC, c.cLevel DESC
           `);
           return result.recordset;
@@ -839,31 +889,73 @@ export const MuDatabase = {
               c.Name, c.cLevel, 
               ISNULL(c.ResetCount, 0) AS ResetCount, 
               c.Class, 
-              ISNULL(g.G_Name, '-') AS GuildName
-            FROM Character c
-            LEFT JOIN GuildMember g ON c.Name = g.G_Name
+              ISNULL(gm.${guildMemberGuildColumn}, '-') AS GuildName
+            FROM ${characterTable} c
+            LEFT JOIN ${guildMemberTable} gm ON c.Name = gm.${guildMemberCharacterColumn}
             ORDER BY c.cLevel DESC, c.ResetCount DESC
+          `);
+          return result.recordset;
+        } else if (category === 'master') {
+          const result = await req.query(`
+            SELECT TOP 50
+              c.Name, c.cLevel,
+              ISNULL(c.${masterLevelColumn}, 0) AS MasterLevel,
+              ISNULL(c.ResetCount, 0) AS ResetCount,
+              ISNULL(c.m_GrandReset, 0) AS m_GrandReset,
+              c.Class,
+              ISNULL(gm.${guildMemberGuildColumn}, '-') AS GuildName
+            FROM ${characterTable} c
+            LEFT JOIN ${guildMemberTable} gm ON c.Name = gm.${guildMemberCharacterColumn}
+            WHERE ISNULL(c.${masterLevelColumn}, 0) > 0
+            ORDER BY c.${masterLevelColumn} DESC, c.cLevel DESC, c.ResetCount DESC
           `);
           return result.recordset;
         } else if (category === 'guilds') {
           const result = await req.query(`
-            SELECT TOP 20 
-              G_Name AS Name, 
-              G_Master AS Master, 
-              G_Score AS Score, 
-              G_Count AS Members
-            FROM Guild
-            ORDER BY G_Score DESC
+            SELECT TOP 20
+              g.G_Name AS Name,
+              g.G_Master AS Master,
+              g.G_Score AS Score,
+              COUNT(gm.${guildMemberCharacterColumn}) AS Members
+            FROM ${guildTable} g
+            LEFT JOIN ${guildMemberTable} gm ON gm.${guildMemberGuildColumn} = g.G_Name
+            GROUP BY g.G_Name, g.G_Master, g.G_Score
+            ORDER BY g.G_Score DESC
           `);
           return result.recordset;
+        } else if (category === 'siege') {
+          const siegeTable = quoteIdentifierPath(dbSchema.siegeTable);
+          const siegeOwnerColumn = quoteIdentifierPath(dbSchema.siegeOwnerColumn);
+          const result = await req.query(`
+            SELECT TOP 1
+              CAST(mc.${siegeOwnerColumn} AS VARCHAR(32)) AS CastleOwner,
+              ISNULL(g.G_Master, '-') AS GuildMaster,
+              '-' AS Alliance,
+              '-' AS DefensesOccupied,
+              '-' AS NextBattleDate,
+              CAST('[]' AS NVARCHAR(MAX)) AS RegisteredGuilds
+            FROM ${siegeTable} mc
+            LEFT JOIN ${guildTable} g ON g.G_Name = mc.${siegeOwnerColumn}
+          `);
+
+          if (result.recordset[0]) {
+            return [{
+              ...result.recordset[0],
+              RegisteredGuilds: [],
+            }];
+          }
+          return [];
         }
       } catch (err) {
-        console.warn('[MSSQL Rankings Query Error, using engine cache]:', err);
+        if (!mockDbEnabled) {
+          throw err;
+        }
+        console.warn('[MSSQL Rankings Query Error, using development mock]:', (err as Error).message);
       }
     }
 
-    // Fallback Mock Engine Rankings
-    const store = global.__mockDbStore!;
+    // Development-only fallback; production must never display fabricated rankings.
+    const store = getMockStore();
     if (category === 'resets') {
       return [...store.characters]
         .sort((a, b) => b.m_GrandReset - a.m_GrandReset || b.ResetCount - a.ResetCount || b.cLevel - a.cLevel)
@@ -909,24 +1001,83 @@ export const MuDatabase = {
    * Server general statistics
    */
   async getServerStats() {
+    const pool = await getDbPool();
+    const baseStats = {
+      serverName: process.env.SERVER_NAME || 'MU ONLINE SEASON 6',
+      subTitle: process.env.SERVER_SUBTITLE || 'Classic Hard & Dynamic Engine',
+      version: process.env.SERVER_VERSION || 'Season 6 Episode 3',
+      experience: process.env.SERVER_EXPERIENCE || '20x ~ 5x (Dinâmica)',
+      dropRate: process.env.SERVER_DROP_RATE || '20%',
+      maxOnline: Number.parseInt(process.env.SERVER_MAX_ONLINE || '1500', 10),
+      connectServerStatus: process.env.SERVER_CONNECT_STATUS || 'Online',
+      gameServer1Status: process.env.SERVER_GAME1_STATUS || 'Online',
+      gameServer2Status: process.env.SERVER_GAME2_STATUS || 'Online',
+    };
+
+    if (pool) {
+      const onlineTable = quoteIdentifierPath(dbSchema.onlineTable);
+      const onlineStatusColumn = quoteIdentifierPath(dbSchema.onlineStatusColumn);
+      const accountTable = quoteIdentifierPath(dbSchema.accountTable);
+      const characterTable = quoteIdentifierPath(dbSchema.characterTable);
+      const guildTable = quoteIdentifierPath(dbSchema.guildTable);
+      const statusValue = dbSchema.onlineStatusValue;
+      const statusPredicate = /^-?\d+$/.test(statusValue)
+        ? `= ${statusValue}`
+        : '= @onlineStatusValue';
+      const request = pool.request();
+
+      if (statusPredicate.includes('@onlineStatusValue')) {
+        request.input('onlineStatusValue', sql.VarChar(16), statusValue);
+      }
+
+      try {
+        const result = await request.query(`
+          SELECT
+            (SELECT COUNT(*) FROM ${onlineTable} WHERE ${onlineStatusColumn} ${statusPredicate}) AS onlinePlayers,
+            (SELECT COUNT(*) FROM ${accountTable}) AS totalAccounts,
+            (SELECT COUNT(*) FROM ${characterTable}) AS totalCharacters,
+            (SELECT COUNT(*) FROM ${guildTable}) AS totalGuilds
+        `);
+        const counts = result.recordset[0] || {};
+        let siege: any[] = [];
+        try {
+          siege = await MuDatabase.getRankings('siege');
+        } catch (siegeError) {
+          console.warn('[MSSQL Siege Query Error]:', (siegeError as Error).message);
+        }
+        const owner = siege[0];
+
+        return {
+          ...baseStats,
+          databaseConnected: true,
+          onlinePlayers: Number(counts.onlinePlayers || 0),
+          totalAccounts: Number(counts.totalAccounts || 0),
+          totalCharacters: Number(counts.totalCharacters || 0),
+          totalGuilds: Number(counts.totalGuilds || 0),
+          castleSiegeOwner: owner?.CastleOwner || '-',
+          castleSiegeMaster: owner?.GuildMaster || '-',
+        };
+      } catch (err) {
+        if (!mockDbEnabled) {
+          throw err;
+        }
+        console.warn('[MSSQL Stats Query Error, using development mock]:', (err as Error).message);
+      }
+    }
+
+    const store = getMockStore();
     return {
-      serverName: 'MU ONLINE SEASON 6',
-      subTitle: 'Classic Hard & Dynamic Engine',
-      version: 'Season 6 Episode 3',
-      experience: '20x ~ 5x (Dinâmica)',
-      dropRate: '20%',
-      onlinePlayers: 487,
-      maxOnline: 1500,
-      totalAccounts: 3824,
-      totalCharacters: 7912,
-      totalGuilds: 142,
-      connectServerStatus: 'Online',
-      gameServer1Status: 'Online (Sub-1 PVP)',
-      gameServer2Status: 'Online (Sub-2 VIP)',
-      castleSiegeOwner: 'Valhalla',
-      castleSiegeMaster: 'LordKael',
+      ...baseStats,
+      databaseConnected: false,
+      onlinePlayers: 0,
+      totalAccounts: store.accounts.length,
+      totalCharacters: store.characters.length,
+      totalGuilds: 0,
+      castleSiegeOwner: '-',
+      castleSiegeMaster: '-',
     };
   },
 };
 
 export default MuDatabase;
+
