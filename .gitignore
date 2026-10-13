@@ -1,7 +1,15 @@
-node_modules/
-.next/
-coverage/
-.DS_Store
+# Runtime data and local machine state
+PanelData/audit.log
+PanelData/*.backup*
 *.log
-.env*
-!.env.example
+
+# Local server/client backups and generated artifacts
+*.backup-*
+*.panel-backup-*
+*.bak
+
+# Editor/OS files
+.DS_Store
+Thumbs.db
+
+
